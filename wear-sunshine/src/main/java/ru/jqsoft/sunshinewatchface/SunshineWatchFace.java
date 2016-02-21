@@ -21,6 +21,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -67,15 +69,15 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
     }
 
     private static class EngineHandler extends Handler {
-        private final WeakReference<SunshineWatchFace.Engine> mWeakReference;
+        private final WeakReference<SunshineWatchFace.Engine> weakReference;
 
         public EngineHandler(SunshineWatchFace.Engine reference) {
-            mWeakReference = new WeakReference<>(reference);
+            weakReference = new WeakReference<>(reference);
         }
 
         @Override
         public void handleMessage(Message msg) {
-            SunshineWatchFace.Engine engine = mWeakReference.get();
+            SunshineWatchFace.Engine engine = weakReference.get();
             if (engine != null) {
                 switch (msg.what) {
                     case MSG_UPDATE_TIME:
@@ -87,28 +89,39 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
     }
 
     private class Engine extends CanvasWatchFaceService.Engine {
-        final Handler mUpdateTimeHandler = new EngineHandler(this);
-        boolean mRegisteredTimeZoneReceiver = false;
-        Paint mBackgroundPaint;
-        Paint mTimeTextPaint;
-        Paint mDateTextPaint;
-        boolean mAmbient;
-        Calendar mCalendar;
-        final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
+        public static final int SPACE_BETWEEN_TEMPERATURES = 10;
+        final Handler updateTimeHandler = new EngineHandler(this);
+        boolean registeredTimeZoneReceiver = false;
+        Paint backgroundPaint;
+        Paint timeTextPaint;
+        Paint linePaint;
+        Paint dateTextPaint;
+        Paint highTemperatureTextPaint;
+        Paint lowTemperatureTextPaint;
+        boolean isAmbientMode;
+        Calendar calendar;
+
+        float timeYOffset;
+        float dateYOffset;
+        float weatherYOffset;
+
+        Bitmap conditionIcon;
+        String highTemperature;
+        String lowTemperature;
+
+        final BroadcastReceiver timeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                mCalendar.setTimeZone(TimeZone.getDefault());
+                calendar.setTimeZone(TimeZone.getDefault());
                 invalidate();
             }
         };
-        float mTimeYOffset;
-        float mDateYOffset;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
          * disable anti-aliasing in ambient mode.
          */
-        boolean mLowBitAmbient;
+        boolean lowBitAmbient;
 
         int digitalTextColor = -1;
         int digitalTextLightColor = -1;
@@ -123,24 +136,35 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setShowSystemUiTime(false)
                     .build());
             Resources resources = SunshineWatchFace.this.getResources();
-            mTimeYOffset = resources.getDimension(R.dimen.time_y_offset);
-            mDateYOffset = resources.getDimension(R.dimen.date_y_offset);
+            timeYOffset = resources.getDimension(R.dimen.time_y_offset);
+            dateYOffset = resources.getDimension(R.dimen.date_y_offset);
+            weatherYOffset = resources.getDimension(R.dimen.weather_y_offset);
 
-            mBackgroundPaint = new Paint();
-            mBackgroundPaint.setColor(ContextCompat.getColor(SunshineWatchFace.this, R.color.background));
+            backgroundPaint = new Paint();
+            backgroundPaint.setColor(ContextCompat.getColor(SunshineWatchFace.this, R.color.background));
 
             digitalTextColor = ContextCompat.getColor(SunshineWatchFace.this, R.color.digital_text);
             digitalTextLightColor = ContextCompat.getColor(SunshineWatchFace.this, R.color.digital_text_light);
-            mTimeTextPaint = createTextPaint(digitalTextColor);
-            mDateTextPaint = createTextPaint(digitalTextLightColor);
+
+            linePaint = new Paint();
+            linePaint.setColor(digitalTextLightColor);
+
+            timeTextPaint = createTextPaint(digitalTextColor);
+            dateTextPaint = createTextPaint(digitalTextLightColor);
+            highTemperatureTextPaint = createTextPaint(digitalTextColor);
+            lowTemperatureTextPaint = createTextPaint(digitalTextLightColor);
 
             // allocate a Calendar to calculate local time using the UTC time and time zone
-            mCalendar = Calendar.getInstance();
+            calendar = Calendar.getInstance();
+
+            highTemperature = "20°";
+            lowTemperature = "5°";
+            conditionIcon = BitmapFactory.decodeResource(resources, Utility.getIconResourceForWeatherCondition(800));
         }
 
         @Override
         public void onDestroy() {
-            mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
+            updateTimeHandler.removeMessages(MSG_UPDATE_TIME);
             super.onDestroy();
         }
 
@@ -160,7 +184,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 registerReceiver();
 
                 // Update time zone in case it changed while we weren't visible.
-                mCalendar.setTimeZone(TimeZone.getDefault());
+                calendar.setTimeZone(TimeZone.getDefault());
             } else {
                 unregisterReceiver();
             }
@@ -171,20 +195,20 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         }
 
         private void registerReceiver() {
-            if (mRegisteredTimeZoneReceiver) {
+            if (registeredTimeZoneReceiver) {
                 return;
             }
-            mRegisteredTimeZoneReceiver = true;
+            registeredTimeZoneReceiver = true;
             IntentFilter filter = new IntentFilter(Intent.ACTION_TIMEZONE_CHANGED);
-            SunshineWatchFace.this.registerReceiver(mTimeZoneReceiver, filter);
+            SunshineWatchFace.this.registerReceiver(timeZoneReceiver, filter);
         }
 
         private void unregisterReceiver() {
-            if (!mRegisteredTimeZoneReceiver) {
+            if (!registeredTimeZoneReceiver) {
                 return;
             }
-            mRegisteredTimeZoneReceiver = false;
-            SunshineWatchFace.this.unregisterReceiver(mTimeZoneReceiver);
+            registeredTimeZoneReceiver = false;
+            SunshineWatchFace.this.unregisterReceiver(timeZoneReceiver);
         }
 
         @Override
@@ -196,17 +220,22 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             boolean isRound = insets.isRound();
             float timeTextSize = resources.getDimension(isRound
                     ? R.dimen.time_text_size_round : R.dimen.time_text_size);
-            mTimeTextPaint.setTextSize(timeTextSize);
+            timeTextPaint.setTextSize(timeTextSize);
 
             float dateTextSize = resources.getDimension(isRound
                     ? R.dimen.date_text_size_round : R.dimen.date_text_size);
-            mDateTextPaint.setTextSize(dateTextSize);
+            dateTextPaint.setTextSize(dateTextSize);
+
+            float temperatureTextSize = resources.getDimension(isRound
+                    ? R.dimen.temperature_text_size_round : R.dimen.temperature_text_size);
+            highTemperatureTextPaint.setTextSize(temperatureTextSize);
+            lowTemperatureTextPaint.setTextSize(temperatureTextSize);
         }
 
         @Override
         public void onPropertiesChanged(Bundle properties) {
             super.onPropertiesChanged(properties);
-            mLowBitAmbient = properties.getBoolean(PROPERTY_LOW_BIT_AMBIENT, false);
+            lowBitAmbient = properties.getBoolean(PROPERTY_LOW_BIT_AMBIENT, false);
         }
 
         @Override
@@ -218,12 +247,16 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         @Override
         public void onAmbientModeChanged(boolean inAmbientMode) {
             super.onAmbientModeChanged(inAmbientMode);
-            if (mAmbient != inAmbientMode) {
-                mDateTextPaint.setColor(inAmbientMode ? digitalTextColor : digitalTextLightColor);
-                mAmbient = inAmbientMode;
-                if (mLowBitAmbient) {
-                    mTimeTextPaint.setAntiAlias(!inAmbientMode);
-                    mDateTextPaint.setAntiAlias(!inAmbientMode);
+            if (isAmbientMode != inAmbientMode) {
+                linePaint.setColor(inAmbientMode ? digitalTextColor : digitalTextLightColor);
+                dateTextPaint.setColor(inAmbientMode ? digitalTextColor : digitalTextLightColor);
+                lowTemperatureTextPaint.setColor(inAmbientMode ? digitalTextColor : digitalTextLightColor);
+                isAmbientMode = inAmbientMode;
+                if (lowBitAmbient) {
+                    timeTextPaint.setAntiAlias(!inAmbientMode);
+                    dateTextPaint.setAntiAlias(!inAmbientMode);
+                    highTemperatureTextPaint.setAntiAlias(!inAmbientMode);
+                    lowTemperatureTextPaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -239,48 +272,76 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             if (isInAmbientMode()) {
                 canvas.drawColor(Color.BLACK);
             } else {
-                canvas.drawRect(0, 0, bounds.width(), bounds.height(), mBackgroundPaint);
+                canvas.drawRect(0, 0, bounds.width(), bounds.height(), backgroundPaint);
             }
 
             // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
-            mCalendar.setTimeInMillis(System.currentTimeMillis());
-            int seconds = mCalendar.get(Calendar.SECOND);
-            int minutes = mCalendar.get(Calendar.MINUTE);
-            int hours = mCalendar.get(Calendar.HOUR);
-            String time = mAmbient
+            calendar.setTimeInMillis(System.currentTimeMillis());
+            int seconds = calendar.get(Calendar.SECOND);
+            int minutes = calendar.get(Calendar.MINUTE);
+            int hours = calendar.get(Calendar.HOUR);
+            String time = isAmbientMode
                     ? String.format("%d:%02d", hours, minutes)
                     : String.format("%d:%02d:%02d", hours, minutes, seconds);
 
             // Draw time text in x-center of screen
-            float timeTextWidth = mTimeTextPaint.measureText(time);
+            float timeTextWidth = timeTextPaint.measureText(time);
             float halfTimeTextWidth = timeTextWidth / 2;
-            float mXOffsetTime = bounds.centerX() - halfTimeTextWidth;
-            canvas.drawText(time, mXOffsetTime, mTimeYOffset, mTimeTextPaint);
+            float xOffsetTime = bounds.centerX() - halfTimeTextWidth;
+            canvas.drawText(time, xOffsetTime, timeYOffset, timeTextPaint);
 
 
             // Draw date text in x-center of screen
             SimpleDateFormat dateFormat = new SimpleDateFormat("EEE, MMM dd yyyy", Locale.US);
-            String date = dateFormat.format(mCalendar.getTime()).toUpperCase(Locale.US);
+            String date = dateFormat.format(calendar.getTime()).toUpperCase(Locale.US);
 
-            float dateTextWidth = mDateTextPaint.measureText(date);
+            float dateTextWidth = dateTextPaint.measureText(date);
             float halfDateTextWidth = dateTextWidth / 2;
-            float mXOffsetDate = bounds.centerX() - halfDateTextWidth;
-            canvas.drawText(date, mXOffsetDate, mDateYOffset, mDateTextPaint);
-        }
+            float xOffsetDate = bounds.centerX() - halfDateTextWidth;
+            canvas.drawText(date, xOffsetDate, dateYOffset, dateTextPaint);
 
-        /**
-         * Starts the {@link #mUpdateTimeHandler} timer if it should be running and isn't currently
-         * or stops it if it shouldn't be running but currently is.
-         */
-        private void updateTimer() {
-            mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
-            if (shouldTimerBeRunning()) {
-                mUpdateTimeHandler.sendEmptyMessage(MSG_UPDATE_TIME);
+            // Draw high and low temperature, icon for weather condition
+            if (conditionIcon != null && highTemperature != null && lowTemperature != null) {
+                float highTemperatureTextWidth = highTemperatureTextPaint.measureText(highTemperature);
+                float lowTemperatureTextWidth = lowTemperatureTextPaint.measureText(lowTemperature);
+
+                Rect temperatureBounds = new Rect();
+                highTemperatureTextPaint.getTextBounds(highTemperature, 0, highTemperature.length(), temperatureBounds);
+
+                float lineYOffset = (dateYOffset + weatherYOffset) / 2 - (temperatureBounds.height() / 2);
+                canvas.drawLine(bounds.centerX() - 4 * SPACE_BETWEEN_TEMPERATURES, lineYOffset,
+                        bounds.centerX() + 4 * SPACE_BETWEEN_TEMPERATURES, lineYOffset, linePaint);
+
+                float xOffsetHighTemperature;
+                if (isAmbientMode) {
+                    xOffsetHighTemperature = bounds.centerX() - ((highTemperatureTextWidth + lowTemperatureTextWidth + SPACE_BETWEEN_TEMPERATURES) / 2);
+                } else {
+                    xOffsetHighTemperature = bounds.centerX() - (highTemperatureTextWidth / 2);
+
+                    canvas.drawBitmap(conditionIcon, xOffsetHighTemperature - conditionIcon.getWidth() - 2 * SPACE_BETWEEN_TEMPERATURES,
+                            weatherYOffset - (temperatureBounds.height() / 2) - (conditionIcon.getHeight() / 2), null);
+                }
+
+                float xOffsetLowTemperature = xOffsetHighTemperature + highTemperatureTextWidth + SPACE_BETWEEN_TEMPERATURES;
+
+                canvas.drawText(highTemperature, xOffsetHighTemperature, weatherYOffset, highTemperatureTextPaint);
+                canvas.drawText(lowTemperature, xOffsetLowTemperature, weatherYOffset, lowTemperatureTextPaint);
             }
         }
 
         /**
-         * Returns whether the {@link #mUpdateTimeHandler} timer should be running. The timer should
+         * Starts the {@link #updateTimeHandler} timer if it should be running and isn't currently
+         * or stops it if it shouldn't be running but currently is.
+         */
+        private void updateTimer() {
+            updateTimeHandler.removeMessages(MSG_UPDATE_TIME);
+            if (shouldTimerBeRunning()) {
+                updateTimeHandler.sendEmptyMessage(MSG_UPDATE_TIME);
+            }
+        }
+
+        /**
+         * Returns whether the {@link #updateTimeHandler} timer should be running. The timer should
          * only run when we're visible and in interactive mode.
          */
         private boolean shouldTimerBeRunning() {
@@ -296,7 +357,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 long timeMs = System.currentTimeMillis();
                 long delayMs = INTERACTIVE_UPDATE_RATE_MS
                         - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
-                mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
+                updateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
         }
     }
