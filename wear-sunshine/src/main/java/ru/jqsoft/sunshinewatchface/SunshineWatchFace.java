@@ -1,19 +1,3 @@
-/*
- * Copyright (C) 2014 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package ru.jqsoft.sunshinewatchface;
 
 import android.content.BroadcastReceiver;
@@ -217,17 +201,13 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             // Load resources that have alternate values for round watches.
             Resources resources = SunshineWatchFace.this.getResources();
-            boolean isRound = insets.isRound();
-            float timeTextSize = resources.getDimension(isRound
-                    ? R.dimen.time_text_size_round : R.dimen.time_text_size);
+            float timeTextSize = resources.getDimension(R.dimen.time_text_size);
             timeTextPaint.setTextSize(timeTextSize);
 
-            float dateTextSize = resources.getDimension(isRound
-                    ? R.dimen.date_text_size_round : R.dimen.date_text_size);
+            float dateTextSize = resources.getDimension(R.dimen.date_text_size);
             dateTextPaint.setTextSize(dateTextSize);
 
-            float temperatureTextSize = resources.getDimension(isRound
-                    ? R.dimen.temperature_text_size_round : R.dimen.temperature_text_size);
+            float temperatureTextSize = resources.getDimension(R.dimen.temperature_text_size);
             highTemperatureTextPaint.setTextSize(temperatureTextSize);
             lowTemperatureTextPaint.setTextSize(temperatureTextSize);
         }
