@@ -21,6 +21,16 @@ import android.support.wearable.watchface.WatchFaceStyle;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.Wearable;
+
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -72,8 +82,17 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine {
-        public static final int SPACE_BETWEEN_TEMPERATURES = 10;
+    private class Engine extends CanvasWatchFaceService.Engine implements DataApi.DataListener,
+            GoogleApiClient.ConnectionCallbacks,
+            GoogleApiClient.OnConnectionFailedListener {
+
+        private static final String WEATHER_PATH = "/weather";
+        private static final String HIGH_TEMPERATURE = "high_temperature";
+        private static final String LOW_TEMPERATURE = "low_temperature";
+        private static final String WEATHER_CONDITION = "weather_condition";
+
+        private static final int SPACE_BETWEEN_TEMPERATURES = 10;
+
         final Handler updateTimeHandler = new EngineHandler(this);
         boolean registeredTimeZoneReceiver = false;
         Paint backgroundPaint;
@@ -110,16 +129,25 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         int digitalTextColor = -1;
         int digitalTextLightColor = -1;
 
+        private GoogleApiClient mGoogleApiClient;
+        private Resources resources;
+
         @Override
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
+
+            mGoogleApiClient = new GoogleApiClient.Builder(SunshineWatchFace.this)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .addApi(Wearable.API)
+                    .build();
 
             setWatchFaceStyle(new WatchFaceStyle.Builder(SunshineWatchFace.this)
                     .setCardPeekMode(WatchFaceStyle.PEEK_MODE_VARIABLE)
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
                     .build());
-            Resources resources = SunshineWatchFace.this.getResources();
+            resources = SunshineWatchFace.this.getResources();
             timeYOffset = resources.getDimension(R.dimen.time_y_offset);
             dateYOffset = resources.getDimension(R.dimen.date_y_offset);
             weatherYOffset = resources.getDimension(R.dimen.weather_y_offset);
@@ -140,10 +168,6 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             // allocate a Calendar to calculate local time using the UTC time and time zone
             calendar = Calendar.getInstance();
-
-            highTemperature = "20°";
-            lowTemperature = "15°";
-            conditionIcon = BitmapFactory.decodeResource(resources, Utility.getIconResourceForWeatherCondition(800));
         }
 
         @Override
@@ -165,11 +189,17 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             super.onVisibilityChanged(visible);
 
             if (visible) {
+                mGoogleApiClient.connect();
                 registerReceiver();
 
                 // Update time zone in case it changed while we weren't visible.
                 calendar.setTimeZone(TimeZone.getDefault());
             } else {
+                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+                    Wearable.DataApi.removeListener(mGoogleApiClient, this);
+                    mGoogleApiClient.disconnect();
+                }
+
                 unregisterReceiver();
             }
 
@@ -339,6 +369,42 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                         - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
                 updateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
+        }
+
+        @Override
+        public void onConnected(Bundle bundle) {
+            Wearable.DataApi.addListener(mGoogleApiClient, this);
+        }
+
+        @Override
+        public void onConnectionSuspended(int i) {
+
+        }
+
+        @Override
+        public void onConnectionFailed(ConnectionResult connectionResult) {
+
+        }
+
+        @Override
+        public void onDataChanged(DataEventBuffer dataEvents) {
+            for (DataEvent dataEvent : dataEvents) {
+                if (dataEvent.getType() == DataEvent.TYPE_CHANGED) {
+                    DataItem dataItem = dataEvent.getDataItem();
+                    if (dataItem.getUri().getPath().compareTo(WEATHER_PATH) == 0) {
+                        DataMap dataMap = DataMapItem.fromDataItem(dataItem).getDataMap();
+                        setWeatherData(dataMap.getString(HIGH_TEMPERATURE),
+                                dataMap.getString(LOW_TEMPERATURE), dataMap.getInt(WEATHER_CONDITION));
+                        invalidate();
+                    }
+                }
+            }
+        }
+
+        private void setWeatherData(String highTemperature, String lowTemperature, int weatherCondition) {
+            this.highTemperature = highTemperature;
+            this.lowTemperature = lowTemperature;
+            this.conditionIcon = BitmapFactory.decodeResource(resources, Utility.getIconResourceForWeatherCondition(weatherCondition));
         }
     }
 }
