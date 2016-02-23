@@ -142,7 +142,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             calendar = Calendar.getInstance();
 
             highTemperature = "20°";
-            lowTemperature = "5°";
+            lowTemperature = "15°";
             conditionIcon = BitmapFactory.decodeResource(resources, Utility.getIconResourceForWeatherCondition(800));
         }
 
