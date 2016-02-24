@@ -10,3 +10,5 @@ I have learnt following things:
 * Understand the fundamentals of Android Wear.
 * Design for multiple watch form factors.
 * Communicate between a mobile device and a wearable device.
+
+![Sunshine Watchface](wear-sunshine/src/main/res/drawable-nodpi/preview_digital.png)
